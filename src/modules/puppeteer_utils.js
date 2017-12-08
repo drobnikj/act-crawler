@@ -252,6 +252,11 @@ export const getPageScrollInfo = page => page.evaluate(() => {
  * @return {Promise.<void>}
  */
 export const infiniteScroll = async (page, maxHeight) => {
+    const context = await page.evaluate(() => window.APIFY_CONTEXT);
+    if (context.request.label !== 'movies_list') {
+        logInfo('Infinite scroll skipped');
+        return;
+    }
     const maybeResourceTypesInfiniteScroll = ['xhr', 'fetch', 'websocket', 'other'];
     const sleepPromised = ms => new Promise(resolve => setTimeout(resolve, ms));
     const stringifyScrollInfo = (scrollInfo) => {
@@ -267,16 +272,32 @@ export const infiniteScroll = async (page, maxHeight) => {
         requested: 0,
         finished: 0,
         failed: 0,
-        //forgotten: 0, TODO: Implement something like forgotten requests like in phantomJS crawler
+        forgotten: 0,
     };
+    const pendingRequests = {};
     page.on('request', (msg) => {
-        if (maybeResourceTypesInfiniteScroll.includes(msg.resourceType)) resourcesStats.requested++;
+        if (maybeResourceTypesInfiniteScroll.includes(msg.resourceType)) {
+            pendingRequests[msg._requestId] = Date.now();
+            resourcesStats.requested++;
+        }
     });
     page.on('requestfailed', (msg) => {
-        if (maybeResourceTypesInfiniteScroll.includes(msg.resourceType)) resourcesStats.failed++;
+        if (maybeResourceTypesInfiniteScroll.includes(msg.resourceType)) {
+            // if request id is not in pending request, request is forgotten
+            if (pendingRequests[msg._requestId]) {
+                delete pendingRequests[msg._requestId];
+                resourcesStats.failed++;
+            }
+
+        }
     });
     page.on('requestfinished', (msg) => {
-        if (maybeResourceTypesInfiniteScroll.includes(msg.resourceType)) resourcesStats.finished++;
+        if (maybeResourceTypesInfiniteScroll.includes(msg.resourceType)) {
+            if (pendingRequests[msg._requestId]) {
+                delete pendingRequests[msg._requestId];
+                resourcesStats.finished++;
+            }
+        }
     });
 
     try {
@@ -285,10 +306,21 @@ export const infiniteScroll = async (page, maxHeight) => {
 
         while (true) {
             scrollInfo = await getPageScrollInfo(page);
-            logDebug(`Infinite scroll stats (${stringifyScrollInfo(scrollInfo)}).`);
 
-            const pendingRequests = resourcesStats.requested - (resourcesStats.finished + resourcesStats.failed);
-            if (pendingRequests === 0) {
+            // Forget pending resources that didn't finish loading in time
+            const now = Date.now();
+            const timeout = 30000; // TODO: use resourceTimeout
+            Object.keys(pendingRequests).forEach((requestId) => {
+                if (pendingRequests[requestId] + timeout < now) {
+                    delete pendingRequests[requestId];
+                    resourcesStats.forgotten++;
+                }
+            });
+
+            logDebug(`Infinite scroll stats (${stringifyScrollInfo(scrollInfo)} resourcesStats=${JSON.stringify(resourcesStats)}).`);
+
+            const pendingRequestsCount = resourcesStats.requested - (resourcesStats.finished + resourcesStats.failed + resourcesStats.forgotten);
+            if (pendingRequestsCount === 0) {
                 // If the page is scrolled to the very bottom or beyond maximum height, we are done
                 if (scrollInfo.scrollTop + scrollInfo.clientHeight >= Math.min(scrollInfo.scrollHeight, maxHeight)) break;
                 // Otherwise we try to scroll down

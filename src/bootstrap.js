@@ -46,6 +46,11 @@ const fetchInput = async () => {
         ? await Apify.client.crawlers.getCrawlerSettings({ crawlerId: input.crawlerId })
         : {};
 
+    if (crawler._id) {
+        Object.keys(INPUT_DEFAULTS).forEach(key => {
+            crawler[key] = crawler[key] || INPUT_DEFAULTS[key];
+        });
+    }
     const mergedInput = Object.assign({}, INPUT_DEFAULTS, crawler, input, {
         actId: APIFY_ACT_ID,
         runId: APIFY_ACT_RUN_ID,
@@ -221,7 +226,7 @@ Apify.main(async () => {
                 }
             }
 
-            setTimeout(resolve, 500); // @TODO implement as randomWaitBetweenRequests param with random wait as in crawler
+            setTimeout(resolve, 5000); // @TODO implement as randomWaitBetweenRequests param with random wait as in crawler
         });
     };
 
