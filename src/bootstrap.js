@@ -226,7 +226,7 @@ Apify.main(async () => {
                 }
             }
 
-            setTimeout(resolve, 5000); // @TODO implement as randomWaitBetweenRequests param with random wait as in crawler
+            setTimeout(resolve, 8000); // @TODO implement as randomWaitBetweenRequests param with random wait as in crawler
         });
     };
 
